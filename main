@@ -1,0 +1,119 @@
+#include <iostream>
+#include <string>
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
+#include <vector>
+
+using json = nlohmann::json;
+
+std::string api_key = "gs_kgk8ktNYvbWc0FQHGuFdYWGdyb3FYTe6VCrIGHRU56EQmiY9uI6ro";
+std::string sanitize_input(const std::string& input) {
+   
+    std::unordered_map<char, char> replacement_map = {
+        {'à', 'a'}, {'è', 'e'}, {'é', 'e'}, {'ì', 'i'}, {'ò', 'o'}, {'ù', 'u'},
+        {'À', 'A'}, {'È', 'E'}, {'É', 'E'}, {'Ì', 'I'}, {'Ò', 'O'}, {'Ù', 'U'}  
+    };
+
+    std::string sanitized_input;
+    for (char c : input) {
+        if (replacement_map.find(c) != replacement_map.end()) {
+            sanitized_input += replacement_map[c];
+        }
+        else if (c >= 32 && c <= 126) {
+            sanitized_input += c;
+        }
+    }
+
+    return sanitized_input;
+}
+size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* s) {
+    s->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
+std::string send_openai_request(const std::vector<json>& messages, const std::string& key) {
+    CURL* curl;
+    CURLcode res;
+    std::string response_string;
+
+    curl = curl_easy_init();
+
+    if (curl) {
+        std::string url = "https://api.groq.com/openai/v1/chat/completions";
+
+        struct curl_slist* headers = nullptr;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        headers = curl_slist_append(headers, ("Authorization: Bearer " + key).c_str());
+
+        json request_body = {
+            {"model", "llama3-8b-8192"},
+            {"messages", messages}
+        };
+
+        std::string request_str = request_body.dump();
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request_str.c_str());
+
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
+
+        res = curl_easy_perform(curl);
+
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(headers);
+
+        if (res != CURLE_OK) {
+            std::cerr << "cURL error: " << curl_easy_strerror(res) << std::endl;
+            return "";
+        }
+    }
+
+    return response_string;
+}
+
+int main
+() {
+    std::string message;
+    std::string comandoIniziale = "Da ora in poi, parla solo in italiano con me!";
+    std::vector<json> messages; 
+    bool start = true;
+    std::cout << "Alexandru_AI (Scrivi 'exit' per chiudere):\n";
+
+    while (true) {
+        std::cout << "You: ";
+        std::getline(std::cin, message);  
+        std::string sanitized_message = sanitize_input(message);
+
+        if (message == "exit") break;
+
+        messages.push_back({ {"role", "user"}, {"content", sanitized_message} });
+
+        std::string response = send_openai_request(messages, api_key);
+
+        try {
+            json json_response = json::parse(response);
+            std::string ai_message = json_response["choices"][0]["message"]["content"];
+            std::cout <<"*""\n" "-AI Response: " << ai_message << "\n""___________________________________________________________________________________________________________________""\n";
+
+            messages.push_back({ {"role", "assistant"}, {"content", ai_message} });
+        }
+        catch (json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << "\n";
+        }
+        catch (json::type_error& e) {
+            std::cerr << "JSON type error: " << e.what() << "\n";
+        }
+        catch (std::exception& e) {
+            std::cerr << "Error: " << e.what() << "\n";
+        }
+        Sleep(1);
+        if (start) {
+
+            start = false;
+        }
+    }
+
+    return 0;
+}
